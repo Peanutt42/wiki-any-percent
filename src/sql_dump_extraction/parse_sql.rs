@@ -55,7 +55,8 @@ pub enum SqlValue {
 	Null,
 	Integer(i64),
 	UnsignedInt(u64),
-	Float(f64),
+	/// not used
+	Float,
 	Bytes(Vec<u8>),
 }
 
@@ -162,10 +163,11 @@ fn collect_token(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
 }
 
 fn parse_number_token(s: &str) -> SqlValue {
+	// `SqlValue::Float` not used
 	if s.contains('.')
-		&& let Ok(f) = s.parse::<f64>()
+		&& let Ok(_) = s.parse::<f64>()
 	{
-		return SqlValue::Float(f);
+		return SqlValue::Float;
 	}
 	if let Ok(v) = s.parse::<u64>() {
 		return SqlValue::UnsignedInt(v);

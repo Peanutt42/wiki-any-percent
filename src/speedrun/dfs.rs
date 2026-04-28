@@ -28,7 +28,6 @@ pub fn speedrun_any_percent_dfs(
 					current_dense_page_id = prev_dense_page_id;
 				}
 				None => {
-					println!("nothing more to look at");
 					return None;
 				}
 			}

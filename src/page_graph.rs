@@ -138,4 +138,8 @@ impl ArchivedPageGraph {
 			..self.backward_offsets[dense_page_id as usize + 1].to_native() as usize]
 			.iter()
 	}
+
+	pub fn num_edges(&self) -> usize {
+		self.forward_edges.len()
+	}
 }

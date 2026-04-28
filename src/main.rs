@@ -1,14 +1,13 @@
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use memmap::Mmap;
 use std::{collections::HashMap, fs::File, io::Write, path::PathBuf, time::Instant};
 use wiki_any_percent::{
 	ArchivedPageGraph, ArchivedPageNames, DensePageId, DensePageIdMapBuilder, PageEdge, PageGraph,
 	PageNameToDensePageIdEntry, PageNames, SpeedrunAlgorithm,
-	convert_to_wikipedia_page_name_convention, speedrun_any_percent_bfs,
-	speedrun_any_percent_bidirectional_bfs, speedrun_any_percent_dfs, speedrun_shortest_path,
-	sql_dump_extraction::{
-		parse_linktarget_sql_dump, parse_page_sql_dump, parse_pagelink_sql_dump,
-	},
+	convert_to_wikipedia_page_name_convention, parse_linktarget_sql_dump, parse_page_sql_dump,
+	parse_pagelink_sql_dump, speedrun_any_percent_bfs, speedrun_any_percent_bidirectional_bfs,
+	speedrun_any_percent_dfs, speedrun_shortest_path,
 };
 
 #[derive(Parser)]
@@ -68,8 +67,9 @@ fn browse_linked_pages(page_names_filepath: PathBuf, page_graph_filepath: PathBu
 	let page_names =
 		rkyv::access::<ArchivedPageNames, rkyv::rancor::Error>(&page_names_bytes).unwrap();
 	println!(
-		"finished reading {}, took {} seconds",
+		"finished reading {} ({} pages), took {} seconds",
 		page_names_filepath.display(),
+		page_names.num_pages(),
 		load_page_names_start.elapsed().as_secs_f32()
 	);
 
@@ -79,8 +79,9 @@ fn browse_linked_pages(page_names_filepath: PathBuf, page_graph_filepath: PathBu
 	let page_graph =
 		rkyv::access::<ArchivedPageGraph, rkyv::rancor::Error>(&page_graph_bytes).unwrap();
 	println!(
-		"finished reading {}, took {} seconds",
+		"finished reading {} ({} edges), took {} seconds",
 		page_graph_filepath.display(),
+		page_graph.num_edges(),
 		load_page_graph_start.elapsed().as_secs_f32()
 	);
 
@@ -92,12 +93,9 @@ fn browse_linked_pages(page_names_filepath: PathBuf, page_graph_filepath: PathBu
 			print!("> ");
 			std::io::stdout().flush().unwrap();
 			std::io::stdin().read_line(&mut new_input).unwrap();
-			input = Some(
-				new_input
-					.strip_suffix('\n')
-					.unwrap_or(new_input.as_str())
-					.to_string(),
-			);
+			input = Some(convert_to_wikipedia_page_name_convention(
+				new_input.strip_suffix('\n').unwrap_or(new_input.as_str()),
+			));
 		}
 
 		if input.is_none() {
@@ -222,12 +220,16 @@ fn speedrun(
 	let load_page_names_start = Instant::now();
 	let page_names_file = File::open(&page_names_filepath).unwrap();
 	let page_names_bytes = unsafe { Mmap::map(&page_names_file) }.unwrap();
-	let page_names =
-		rkyv::access::<ArchivedPageNames, rkyv::rancor::Error>(&page_names_bytes).unwrap();
+	let page_names = unsafe { rkyv::access_unchecked::<ArchivedPageNames>(&page_names_bytes) };
 	println!(
-		"finished reading {}, took {} seconds",
-		page_names_filepath.display(),
-		load_page_names_start.elapsed().as_secs_f32()
+		"{}",
+		format!(
+			"finished reading {} ({} pages), took {} milliseconds",
+			page_names_filepath.display(),
+			page_names.num_pages(),
+			load_page_names_start.elapsed().as_secs_f32() * 1000.0
+		)
+		.bright_black()
 	);
 
 	let load_page_graph_start = Instant::now();
@@ -236,9 +238,14 @@ fn speedrun(
 	let page_graph =
 		rkyv::access::<ArchivedPageGraph, rkyv::rancor::Error>(&page_graph_bytes).unwrap();
 	println!(
-		"finished reading {}, took {} seconds",
-		page_graph_filepath.display(),
-		load_page_graph_start.elapsed().as_secs_f32()
+		"{}",
+		format!(
+			"finished reading {} ({} edges), took {} milliseconds",
+			page_graph_filepath.display(),
+			page_graph.num_edges(),
+			load_page_graph_start.elapsed().as_secs_f32() * 1000.0
+		)
+		.bright_black()
 	);
 
 	let page_name_lookup_start = Instant::now();
@@ -248,45 +255,51 @@ fn speedrun(
 	let start_dense_page_id = match page_names.lookup_name(&start_page_name) {
 		Some(dense_page_id) => dense_page_id,
 		None => {
-			panic!("could not find page with name: {start_page_name}!");
+			panic!("could not find start page '{start_page_name}'!");
 		}
 	};
 	let end_dense_page_id = match page_names.lookup_name(&end_page_name) {
 		Some(dense_page_id) => dense_page_id,
 		None => {
-			panic!("could not find page with name: {end_page_name}!");
+			panic!("could not find end page '{end_page_name}'!");
 		}
 	};
 	println!(
-		"name convertion and lookup took: {:.3} milliseconds",
+		"(name convertion and lookup took: {:.3} milliseconds)",
 		page_name_lookup_start.elapsed().as_secs_f32() * 1000.0
 	);
 
+	println!();
+
 	let speedrun_start = Instant::now();
 	let result = mode.get_algo()(start_dense_page_id, end_dense_page_id, page_graph);
+	let speedrun_milliseconds = speedrun_start.elapsed().as_secs_f32() * 1000.0;
 
 	if let Some(trail) = result {
-		println!(
-			"Path found, took {:.2} milliseconds",
-			speedrun_start.elapsed().as_secs_f32() * 1000.0
-		);
-		let trail_formatted = trail
+		println!("Path found, took {speedrun_milliseconds:.2} milliseconds");
+
+		let resolve_path_start = Instant::now();
+		let path_formatted = trail
 			.into_iter()
 			.map(|dense_page_id| {
 				let page_name = page_names
 					.lookup_dense_page_id(dense_page_id)
-					.unwrap_or("<page name not found>");
-				format!("{page_name} ({dense_page_id})")
+					.map(|n| n.bright_cyan().bold())
+					.unwrap_or("<page name not found>".bright_red());
+				format!(
+					"{page_name} {}",
+					format!("({dense_page_id})").bright_black()
+				)
 			})
 			.collect::<Vec<String>>()
-			.join("\n -> ");
+			.join(format!("\n {} ", "->".bright_yellow()).as_str());
 
-		println!("{trail_formatted}");
-	} else {
-		panic!(
-			"no possible path was found! (took {:.2} milliseconds)",
-			speedrun_start.elapsed().as_secs_f32() * 1000.0
+		println!(
+			"{path_formatted}\n(resolving path names took {:.3} milliseconds)",
+			resolve_path_start.elapsed().as_secs_f32() * 1000.0
 		);
+	} else {
+		panic!("no possible path was found! (took {speedrun_milliseconds:.2} milliseconds)");
 	}
 }
 

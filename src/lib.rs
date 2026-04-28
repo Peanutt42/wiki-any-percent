@@ -10,7 +10,10 @@ pub use page_rank::PageRank;
 mod dense_page_id_map;
 pub use dense_page_id_map::{DensePageId, DensePageIdMap, DensePageIdMapBuilder, PageEdge};
 
-pub mod sql_dump_extraction;
+mod sql_dump_extraction;
+pub use sql_dump_extraction::{
+	parse_linktarget_sql_dump, parse_page_sql_dump, parse_pagelink_sql_dump,
+};
 
 mod wikipedia_page_name;
 pub use wikipedia_page_name::convert_to_wikipedia_page_name_convention;

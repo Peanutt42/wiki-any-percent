@@ -8,7 +8,7 @@ mod parse_pagelink;
 pub use parse_pagelink::parse_pagelink_sql_dump;
 
 mod parse_sql;
-pub use parse_sql::{SqlValue, parse_sql_inserts};
+pub use parse_sql::parse_sql_inserts;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PageLink {
